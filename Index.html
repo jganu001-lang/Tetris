@@ -8,6 +8,28 @@
     #ui { margin-left:20px; }
     .box { margin-bottom:10px; padding:10px; background:#111633; border-radius:10px; }
     #combo { font-size:20px; color:#00e5ff; height:30px; }
+
+    #gameOverScreen {
+      position:fixed;
+      top:0; left:0;
+      width:100%; height:100%;
+      background:rgba(0,0,0,0.85);
+      display:flex;
+      flex-direction:column;
+      justify-content:center;
+      align-items:center;
+      visibility:hidden;
+    }
+
+    #gameOverScreen button {
+      margin-top:20px;
+      padding:15px 30px;
+      font-size:18px;
+      border:none;
+      border-radius:10px;
+      background:#00e5ff;
+      cursor:pointer;
+    }
   </style>
 </head>
 <body>
@@ -15,13 +37,21 @@
 <div id="ui">
   <div class="box"><h2>Block Sky ULTRA+++</h2></div>
   <div class="box">Score: <span id="score">0</span></div>
+  <div class="box">High Score: <span id="highscore">0</span></div>
   <div class="box">Level: <span id="level">1</span></div>
   <div class="box">Lines: <span id="lines">0</span></div>
   <div id="combo"></div>
 </div>
 
-<audio id="bgm" loop autoplay>
-  <source src="https://cdn.pixabay.com/audio/2022/03/15/audio_115b9b1c6c.mp3" type="audio/mpeg">
+<div id="gameOverScreen">
+  <div style="font-size:40px">GAME OVER</div>
+  <div id="finalScore"></div>
+  <button onclick="restartGame()">Restart</button>
+</div>
+
+<!-- Lofi music -->
+<audio id="bgm" loop>
+  <source src="https://cdn.pixabay.com/audio/2023/03/21/audio_6b0f3b2d63.mp3" type="audio/mpeg">
 </audio>
 
 <script>
@@ -29,107 +59,189 @@ const canvas=document.getElementById('game');
 const ctx=canvas.getContext('2d');
 
 const COLS=18, ROWS=24, SIZE=30;
-let board=Array.from({length:ROWS},()=>Array(COLS).fill(0));
-let score=0,level=1,lines=0,combo=0;
-let dropCounter=0,dropInterval=700,lastTime=0;
+let board, score, level, lines, combo;
+let dropCounter, dropInterval, lastTime;
 let clearAnimationRows=[];
+let gameOver=false;
 
-const SHAPES=[[[1,1,1,1]],[[1,1],[1,1]],[[0,1,0],[1,1,1]],[[1,0,0],[1,1,1]],[[0,0,1],[1,1,1]],[[1,1,0],[0,1,1]],[[0,1,1],[1,1,0]]];
+// CORRECT TETRIS SHAPES (rotation gives vertical automatically)
+const SHAPES=[
+  [[1,1,1,1]], // I
+  [[1,1],[1,1]], // O
+  [[0,1,0],[1,1,1]], // T
+  [[1,0,0],[1,1,1]], // L
+  [[0,0,1],[1,1,1]], // J
+  [[1,1,0],[0,1,1]], // S
+  [[0,1,1],[1,1,0]]  // Z
+];
+
 const COLORS=[null,'#00e5ff','#ffe600','#b84dff','#ff9a00','#2979ff','#00e676','#ff1744'];
 
-function randPiece(){return{matrix:SHAPES[Math.floor(Math.random()*SHAPES.length)],pos:{x:7,y:0},color:Math.floor(Math.random()*7)+1}}
-let player=randPiece();
-
-function drawBlock(x,y,c,a=1){ctx.globalAlpha=a;ctx.fillStyle=COLORS[c];ctx.fillRect(x*SIZE,y*SIZE,SIZE,SIZE);ctx.strokeStyle="#000";ctx.strokeRect(x*SIZE,y*SIZE,SIZE,SIZE);ctx.globalAlpha=1}
-
-function draw(){ctx.fillStyle="#0b0f1a";ctx.fillRect(0,0,canvas.width,canvas.height);
-
- board.forEach((r,y)=>r.forEach((v,x)=>{
-  if(v){
-    if(clearAnimationRows.includes(y)){
-      ctx.fillStyle="white";
-      ctx.fillRect(x*SIZE,y*SIZE,SIZE,SIZE);
-    } else drawBlock(x,y,v);
-  }
- }));
-
- drawGhost();
- player.matrix.forEach((r,y)=>r.forEach((v,x)=>{if(v)drawBlock(x+player.pos.x,y+player.pos.y,player.color)}));
-}
-
-function drawGhost(){let ghostY=player.pos.y;
- while(!collide(board,{matrix:player.matrix,pos:{x:player.pos.x,y:ghostY}})) ghostY++;
- ghostY--;
- player.matrix.forEach((r,y)=>r.forEach((v,x)=>{if(v)drawBlock(x+player.pos.x,y+ghostY,player.color,0.25)}));
-}
-
-function collide(b,p){for(let y=0;y<p.matrix.length;y++){
- for(let x=0;x<p.matrix[y].length;x++){
-  if(p.matrix[y][x]){
-    let newX=x+p.pos.x;
-    let newY=y+p.pos.y;
-
-    if(newX<0||newX>=COLS||newY>=ROWS) return true; // WALL COLLISION FIX
-    if(newY>=0 && b[newY][newX]!==0) return true;
-  }
- }
-}
-return false;}
-
-function merge(){player.matrix.forEach((r,y)=>r.forEach((v,x)=>{if(v)board[y+player.pos.y][x+player.pos.x]=player.color}))}
-
-function rotate(m){return m[0].map((_,i)=>m.map(r=>r[i])).reverse()}
-function playerRotate(){player.matrix=rotate(player.matrix)}
-
-function clearLines(){let rowsCleared=[];
- for(let y=ROWS-1;y>=0;y--){if(board[y].every(v=>v!==0)) rowsCleared.push(y);}
-
- if(rowsCleared.length){
-  clearAnimationRows=rowsCleared;
-
-  combo++;
-  showCombo(combo);
-
-  setTimeout(()=>{
-    rowsCleared.forEach(y=>{board.splice(y,1);board.unshift(Array(COLS).fill(0));});
-    clearAnimationRows=[];
-  },150);
-
-  score+=[0,100,300,800,2000][rowsCleared.length]*level*combo;
-  lines+=rowsCleared.length;
-  if(lines>=level*10){level++;dropInterval*=0.85;}
- } else {
-  combo=0;
- }
-}
-
-function showCombo(c){const el=document.getElementById('combo');
- if(c>1){
-  el.innerText="COMBO x"+c+"!";
-  el.style.transform="scale(1.5)";
-  setTimeout(()=>{el.style.transform="scale(1)";},200);
- } else el.innerText="";
-}
-
-function drop(){player.pos.y++;
- if(collide(board,player)){
-  player.pos.y--;
-  merge();
+function init(){
+  board=Array.from({length:ROWS},()=>Array(COLS).fill(0));
+  score=0; level=1; lines=0; combo=0;
+  dropCounter=0; dropInterval=700; lastTime=0;
+  gameOver=false;
   player=randPiece();
-  clearLines();
- }
- dropCounter=0;
 }
 
-function hardDrop(){while(!collide(board,player))player.pos.y++;player.pos.y--;drop();}
+function randPiece(){
+  const m = SHAPES[Math.floor(Math.random()*SHAPES.length)];
+  const startX = Math.floor(COLS/2 - m[0].length/2);
+  return {
+    matrix:m,
+    pos:{x:startX,y:0},
+    color:Math.floor(Math.random()*7)+1
+  };
+}
+
+let player;
+
+function drawBlock(x,y,c,a=1){
+  ctx.globalAlpha=a;
+  ctx.fillStyle=COLORS[c];
+  ctx.fillRect(x*SIZE,y*SIZE,SIZE,SIZE);
+  ctx.strokeStyle="#000";
+  ctx.strokeRect(x*SIZE,y*SIZE,SIZE,SIZE);
+  ctx.globalAlpha=1;
+}
+
+function draw(){
+  ctx.fillStyle="#0b0f1a";
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+
+  board.forEach((r,y)=>r.forEach((v,x)=>{
+    if(v){
+      if(clearAnimationRows.includes(y)){
+        ctx.fillStyle="white";
+        ctx.fillRect(x*SIZE,y*SIZE,SIZE,SIZE);
+      } else drawBlock(x,y,v);
+    }
+  }));
+
+  drawGhost();
+
+  player.matrix.forEach((r,y)=>r.forEach((v,x)=>{
+    if(v) drawBlock(x+player.pos.x,y+player.pos.y,player.color);
+  }));
+}
+
+function drawGhost(){
+  let ghostY=player.pos.y;
+  while(!collide(board,{matrix:player.matrix,pos:{x:player.pos.x,y:ghostY}})) ghostY++;
+  ghostY--;
+  player.matrix.forEach((r,y)=>r.forEach((v,x)=>{
+    if(v) drawBlock(x+player.pos.x,y+ghostY,player.color,0.25);
+  }));
+}
+
+function collide(b,p){
+  for(let y=0;y<p.matrix.length;y++){
+    for(let x=0;x<p.matrix[y].length;x++){
+      if(p.matrix[y][x]){
+        let newX=x+p.pos.x;
+        let newY=y+p.pos.y;
+        if(newX<0||newX>=COLS||newY>=ROWS) return true;
+        if(newY>=0 && b[newY][newX]!==0) return true;
+      }
+    }
+  }
+  return false;
+}
+
+function merge(){
+  player.matrix.forEach((r,y)=>r.forEach((v,x)=>{
+    if(v){
+      let by=y+player.pos.y;
+      let bx=x+player.pos.x;
+      if(by>=0 && by<ROWS && bx>=0 && bx<COLS){
+        board[by][bx]=player.color;
+      }
+    }
+  }));
+}
+
+function rotate(m){return m[0].map((_,i)=>m.map(r=>r[i])).reverse();}
+function playerRotate(){
+  const rotated=rotate(player.matrix);
+  const old=player.matrix;
+  player.matrix=rotated;
+  if(collide(board,player)) player.matrix=old;
+}
+
+function clearLines(){
+  let rowsCleared=[];
+  for(let y=ROWS-1;y>=0;y--){
+    if(board[y].every(v=>v!==0)) rowsCleared.push(y);
+  }
+
+  if(rowsCleared.length){
+    clearAnimationRows=rowsCleared;
+    combo++;
+
+    setTimeout(()=>{
+      rowsCleared.sort((a,b)=>b-a).forEach(y=>{
+        board.splice(y,1);
+        board.unshift(Array(COLS).fill(0));
+      });
+      clearAnimationRows=[];
+    },150);
+
+    const points=[0,100,300,800,2000];
+    const idx=Math.min(rowsCleared.length,4);
+    score+=points[idx]*level*combo;
+
+    lines+=rowsCleared.length;
+    if(lines>=level*10){level++;dropInterval*=0.85;}
+  } else combo=0;
+}
+
+function spawn(){
+  player=randPiece();
+  if(collide(board,player)) triggerGameOver();
+}
+
+function triggerGameOver(){
+  gameOver=true;
+  document.getElementById('gameOverScreen').style.visibility='visible';
+  document.getElementById('finalScore').innerText='Score: '+score;
+
+  let high=localStorage.getItem('blocksky_high')||0;
+  if(score>high){ localStorage.setItem('blocksky_high',score); }
+}
+
+function restartGame(){
+  document.getElementById('gameOverScreen').style.visibility='hidden';
+  init();
+}
+
+function drop(){
+  if(gameOver) return;
+  player.pos.y++;
+  if(collide(board,player)){
+    player.pos.y--;
+    merge();
+    clearLines();
+    spawn();
+  }
+  dropCounter=0;
+}
+
+function hardDrop(){
+  if(gameOver) return;
+  while(!collide(board,player)) player.pos.y++;
+  player.pos.y--;
+  drop();
+}
 
 // INPUT
 document.addEventListener('keydown',e=>{
- if(e.key==='ArrowLeft'){player.pos.x--; if(collide(board,player)) player.pos.x++;}
- if(e.key==='ArrowRight'){player.pos.x++; if(collide(board,player)) player.pos.x--;}
- if(e.key==='ArrowDown')drop();
- if(e.key==='ArrowUp')playerRotate();
- if(e.key===' ')hardDrop();
+  if(gameOver) return;
+  if(e.key==='ArrowLeft'){player.pos.x--; if(collide(board,player)) player.pos.x++;}
+  if(e.key==='ArrowRight'){player.pos.x++; if(collide(board,player)) player.pos.x--;}
+  if(e.key==='ArrowDown')drop();
+  if(e.key==='ArrowUp')playerRotate();
+  if(e.key===' ')hardDrop();
 });
 
 function update(time=0){
@@ -137,18 +249,8 @@ function update(time=0){
   lastTime=time;
   dropCounter+=delta;
 
-  // FIXED GRAVITY SYSTEM (classic falling behavior)
   if(dropCounter>dropInterval){
-    player.pos.y++;
-
-    if(collide(board,player)){
-      player.pos.y--;
-      merge();
-      player=randPiece();
-      clearLines();
-    }
-
-    dropCounter=0;
+    drop();
   }
 
   draw();
@@ -156,10 +258,19 @@ function update(time=0){
   requestAnimationFrame(update);
 }
 
-function ui(){document.getElementById('score').innerText=score;document.getElementById('level').innerText=level;document.getElementById('lines').innerText=lines}
+function ui(){
+  document.getElementById('score').innerText=score;
+  document.getElementById('level').innerText=level;
+  document.getElementById('lines').innerText=lines;
+  document.getElementById('highscore').innerText=localStorage.getItem('blocksky_high')||0;
+}
 
-document.body.addEventListener('click',()=>{document.getElementById('bgm').play().catch(()=>{});});
+// start music on click (browser rule)
+document.body.addEventListener('click',()=>{
+  document.getElementById('bgm').play().catch(()=>{});
+});
 
+init();
 update();
 </script>
 </body>
